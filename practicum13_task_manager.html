@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BioNest - Order Task Manager</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; background:#f5f7f1; color:#1d2b22; margin:0; padding:20px; }
+  h1 { color:#2e5a3c; margin:0; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+  .bar input, .bar select { padding:8px; border:1px solid #c9d3c0; border-radius:4px; font:inherit; }
+  .bar input[type=text] { flex:1 1 200px; }
+  button { padding:8px 14px; border:0; border-radius:4px; background:#2e5a3c; color:#fff; cursor:pointer; font:inherit; }
+  button.small { padding:4px 8px; font-size:12px; background:#b98b55; }
+  button.danger { background:#c0392b; }
+  .board { display:grid; grid-template-columns: repeat(3, 1fr); gap:14px; }
+  .column { background:#e8eee1; border-radius:8px; padding:10px; min-height:200px; }
+  .column h2 { font-size:16px; margin:0 0 10px; }
+  .card { background:#fff; border-left:5px solid #999; border-radius:6px; padding:10px; margin-bottom:8px; }
+  .card.High { border-left-color:#c0392b; } .card.Medium { border-left-color:#e0a800; } .card.Low { border-left-color:#2e8b57; }
+  .card h3 { margin:0 0 4px; font-size:15px; }
+  .meta { font-size:12px; color:#555; margin-bottom:6px; }
+  .actions { display:flex; flex-wrap:wrap; gap:4px; }
+  .filter { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  @media (max-width: 700px) { .board { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1>BioNest Order Tracker</h1>
+<p>Biodegradable packaging solutions &ndash; track each order from request to delivery.</p>
+
+<form class="bar" id="taskForm">
+  <input type="text" id="title" placeholder="e.g. 500 compostable mailers for GreenKart" required maxlength="80" aria-label="Task title">
+  <select id="priority" aria-label="Priority"><option>High</option><option selected>Medium</option><option>Low</option></select>
+  <input type="date" id="deadline" aria-label="Deadline">
+  <button type="submit" id="addBtn">Add task</button>
+</form>
+
+<div class="filter">
+  <input type="text" id="search" placeholder="Search tasks" aria-label="Search tasks" style="padding:8px">
+  <select id="filterPriority" aria-label="Filter by priority"><option value="">All priorities</option><option>High</option><option>Medium</option><option>Low</option></select>
+</div>
+
+<div class="board">
+  <section class="column"><h2>Order Received</h2><div id="Pending"></div></section>
+  <section class="column"><h2>In Production</h2><div id="InProgress"></div></section>
+  <section class="column"><h2>Shipped</h2><div id="Completed"></div></section>
+</div>
+
+<script>
+  const stages = ["Pending", "InProgress", "Completed"];
+  let tasks = [];
+  try { tasks = JSON.parse(localStorage.getItem("bionestTasks")) || []; } catch (e) { tasks = []; }
+  let editingId = null;
+
+  function saveTasks() { localStorage.setItem("bionestTasks", JSON.stringify(tasks)); }
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+  function renderTasks() {
+    const q = document.getElementById("search").value.toLowerCase();
+    const pr = document.getElementById("filterPriority").value;
+    stages.forEach(s => document.getElementById(s).innerHTML = "");
+
+    tasks.filter(t => t.title.toLowerCase().includes(q) && (!pr || t.priority === pr)).forEach(t => {
+      const i = stages.indexOf(t.status);
+      const card = document.createElement("div");
+      card.className = "card " + t.priority;
+      card.innerHTML = `<h3>${esc(t.title)}</h3>
+        <div class="meta">${t.priority} priority${t.deadline ? " &middot; due " + t.deadline : ""}</div>
+        <div class="actions">
+          ${i > 0 ? `<button class="small" data-act="back" data-id="${t.id}">&larr; Back</button>` : ""}
+          ${i < 2 ? `<button class="small" data-act="next" data-id="${t.id}">Move &rarr;</button>` : ""}
+          <button class="small" data-act="edit" data-id="${t.id}">Edit</button>
+          <button class="small danger" data-act="del" data-id="${t.id}">Delete</button>
+        </div>`;
+      document.getElementById(t.status).appendChild(card);
+    });
+  }
+
+  document.getElementById("taskForm").addEventListener("submit", e => {
+    e.preventDefault();
+    const title = document.getElementById("title").value.trim();
+    if (!title) return;
+    const data = { title, priority: document.getElementById("priority").value, deadline: document.getElementById("deadline").value };
+    if (editingId === null) {
+      tasks.push({ id: Date.now(), status: "Pending", ...data });
+    } else {
+      tasks = tasks.map(t => t.id === editingId ? { ...t, ...data } : t);   // update in place, no duplicate
+      editingId = null;
+      document.getElementById("addBtn").textContent = "Add task";
+    }
+    saveTasks(); renderTasks(); e.target.reset();
+  });
+
+  // One listener on the page handles every card button (event delegation)
+  document.querySelector(".board").addEventListener("click", e => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const id = Number(btn.dataset.id);
+    const t = tasks.find(x => x.id === id);
+    if (btn.dataset.act === "next") t.status = stages[stages.indexOf(t.status) + 1];
+    if (btn.dataset.act === "back") t.status = stages[stages.indexOf(t.status) - 1];
+    if (btn.dataset.act === "del") tasks = tasks.filter(x => x.id !== id);
+    if (btn.dataset.act === "edit") {
+      editingId = id;
+      document.getElementById("title").value = t.title;
+      document.getElementById("priority").value = t.priority;
+      document.getElementById("deadline").value = t.deadline;
+      document.getElementById("addBtn").textContent = "Save changes";
+      document.getElementById("title").focus();
+      return;
+    }
+    saveTasks(); renderTasks();
+  });
+
+  document.getElementById("search").addEventListener("input", renderTasks);
+  document.getElementById("filterPriority").addEventListener("change", renderTasks);
+  renderTasks();
+</script>
+</body>
+</html>
